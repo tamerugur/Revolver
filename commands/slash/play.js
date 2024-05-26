@@ -5,9 +5,15 @@ const {
   createAudioPlayer,
   createAudioResource,
   AudioPlayerStatus,
+  getVoiceConnection,
 } = require("@discordjs/voice");
 const ytdl = require("ytdl-core");
 const path = require("path");
+const state = {
+  queue: [],
+  player: null,
+  connection: null,
+};
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -27,6 +33,7 @@ module.exports = {
       });
       return;
     }
+
     const youtubeUrl = interaction.options.getString("url");
     if (!ytdl.validateURL(youtubeUrl)) {
       await interaction.reply({
@@ -37,66 +44,100 @@ module.exports = {
     }
 
     try {
-      const connection = joinVoiceChannel({
-        channelId: voiceChannel.id,
-        guildId: interaction.guildId,
-        adapterCreator: interaction.guild.voiceAdapterCreator,
-      });
-
-      await interaction.reply({
-        content: `playing`,
-      });
-
-      const player = createAudioPlayer();
-      const stream = ytdl(youtubeUrl, { filter: "audioonly" });
-
-      console.log("Stream created");
-
       const info = await ytdl.getInfo(youtubeUrl);
       const title = info.videoDetails.title;
-      const audioDirectory = path.join(__dirname, "music");
-      const audioFilePath = path.join(audioDirectory, `${title}.mp3`);
-      // Create directory if it doesn't exist
 
-      const fileWriteStream = fs.createWriteStream(audioFilePath);
-      fileWriteStream.on("finish", () => {
-        console.log("Audio file downloaded:", audioFilePath);
-      });
-      stream.pipe(fileWriteStream);
-      console.log("8");
-      stream.on("end", async () => {
-        // Create an audio resource from the downloaded file
-        console.log("8");
-        const resource = createAudioResource(audioFilePath);
-        console.log("9");
-        // Play the audio resource
-        player.play(resource);
-        console.log("10");
-        // Subscribe the connection to the player
-        connection.subscribe(player);
-        // Log a message indicating that the audio is playing
-        console.log("Audio playback started");
+      state.queue.push({ url: youtubeUrl, title });
 
-        // Event listener for when the player finishes playing
-        player.on(AudioPlayerStatus.Idle, () => {
-          // Send a message to indicate that the bot has finished playing the audio
-          console.log("Audio playback finished");
-          // Cleanup resources, such as deleting the temporary audio file
-          setTimeout(() => {
-            // Cleanup resources, such as deleting the temporary audio file
-            fs.unlinkSync(audioFilePath);
-            // Destroy the connection
-            connection.destroy();
-          }, 60000);
-        });
+      await interaction.reply({
+        content: `${title} added to the queue.`,
+        ephemeral: true,
       });
+
+      if (state.queue.length === 1) {
+        playNextSong(voiceChannel);
+      }
     } catch (error) {
       console.error(error);
       await interaction.reply({
-        content:
-          "There was an error joining the voice channel or playing the audio file!",
+        content: "There was an error processing your request.",
         ephemeral: true,
       });
     }
   },
 };
+
+async function playNextSong(voiceChannel) {
+  if (state.queue.length === 0) {
+    return;
+  }
+
+  const { url, title } = state.queue[0];
+
+  try {
+    if (!state.connection) {
+      state.connection = joinVoiceChannel({
+        channelId: voiceChannel.id,
+        guildId: voiceChannel.guild.id,
+        adapterCreator: voiceChannel.guild.voiceAdapterCreator,
+      });
+    }
+
+    const sanitizedTitle = title.replace(/[<>:"\/\\|?*]/g, "");
+    const audioDirectory = path.join(__dirname, "music");
+
+    if (!fs.existsSync(audioDirectory)) {
+      fs.mkdirSync(audioDirectory);
+    }
+
+    const audioFilePath = path.join(audioDirectory, `${sanitizedTitle}.mp3`);
+    const tempFilePath = path.join(audioDirectory, `${sanitizedTitle}.tmp.mp3`);
+
+    const stream = ytdl(url, { filter: "audioonly" });
+    const fileWriteStream = fs.createWriteStream(tempFilePath);
+
+    stream.pipe(fileWriteStream);
+
+    fileWriteStream.on("finish", () => {
+      fs.renameSync(tempFilePath, audioFilePath);
+
+      if (!state.player) {
+        state.player = createAudioPlayer();
+      }
+
+      const resource = createAudioResource(audioFilePath);
+      state.player.play(resource);
+      if (state.connection) {
+        state.connection.subscribe(state.player);
+      } else {
+        console.error(
+          "Connection is null while trying to subscribe the player."
+        );
+      }
+
+      state.player.on(AudioPlayerStatus.Idle, () => {
+        setTimeout(() => {
+          try {
+            fs.unlinkSync(audioFilePath);
+          } catch (err) {
+            console.error(`Error deleting file: ${err}`);
+          }
+        }, 2000);
+
+        state.queue.shift(); 
+        if (state.queue.length > 0) {
+          playNextSong(voiceChannel); 
+        } else {
+          state.connection.destroy(); 
+          state.connection = null;
+          state.player = null;
+        }
+      });
+    });
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+module.exports.state = state;
+module.exports.playNextSong = playNextSong;

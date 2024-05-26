@@ -12,7 +12,6 @@ const client = new Client({
     GatewayIntentBits.GuildVoiceStates,
   ],
 });
-console.log("sdssd");
 // Initialize collections for commands
 client.commands = new Map();
 client.slashCommands = new Map();

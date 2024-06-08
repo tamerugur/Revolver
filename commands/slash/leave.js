@@ -1,6 +1,6 @@
 const { SlashCommandBuilder } = require("@discordjs/builders");
 const { joinVoiceChannel, getVoiceConnection } = require("@discordjs/voice");
-
+const { deleteFiles } = require("./play.js");
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("leave")
@@ -12,7 +12,6 @@ module.exports = {
     if (!voiceChannel) {
       await interaction.reply({
         content: "I'm not in a voice channel!",
-        ephemeral: true,
       });
       return;
     }
@@ -21,11 +20,10 @@ module.exports = {
     if (!connection) {
       await interaction.reply({
         content: "I'm not connected to a voice channel!",
-        ephemeral: true,
       });
       return;
     }
-
+    deleteFiles();
     connection.destroy();
     await interaction.reply("Left the voice channel!");
   },

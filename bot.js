@@ -2,19 +2,6 @@ require("dotenv").config();
 const { Client, GatewayIntentBits, REST, Routes } = require("discord.js");
 const { readdirSync } = require("fs");
 const path = require("path");
-const { MongoClient } = require("mongodb"); // Added for MongoDB
-
-// MongoDB setup
-const uri = process.env.MONGO_URI;
-const clientDB = new MongoClient(uri);
-
-let db;
-
-async function connectDB() {
-  await clientDB.connect();
-  db = clientDB.db("dcserver"); // Name of your database
-  console.log("Connected to MongoDB");
-}
 
 // Discord bot setup
 const client = new Client({
@@ -27,7 +14,6 @@ const client = new Client({
   ],
 });
 
-// Initialize collections for commands
 client.commands = new Map();
 client.slashCommands = new Map();
 
@@ -84,22 +70,7 @@ client.on("interactionCreate", async (interaction) => {
 
 // Handle guild creation event
 client.on("guildCreate", async (guild) => {
-  const collection = db.collection("server_credentials");
-
-  // You can store other relevant information as needed
-  const serverData = {
-    guildID: guild.id,
-    guildName: guild.name,
-    ownerID: guild.ownerId,
-  };
-
-  await collection.updateOne(
-    { guildID: guild.id },
-    { $set: serverData },
-    { upsert: true }
-  );
-
-  console.log(`Stored credentials for guild: ${guild.name}`);
+  console.log(`Joined a new guild: ${guild.name} (id: ${guild.id})`);
 });
 
 client.on("ready", async () => {
@@ -107,13 +78,9 @@ client.on("ready", async () => {
 
   try {
     console.log("Registering Slash Commands...");
-    await rest.put(
-      Routes.applicationGuildCommands(
-        process.env.CLIENT_ID,
-        process.env.GUILD_ID
-      ),
-      { body: commands }
-    );
+    await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), {
+      body: commands,
+    });
     console.log("Slash commands registered successfully!");
   } catch (error) {
     console.error(`Error registering slash commands: ${error}`);
@@ -148,10 +115,3 @@ function command(message) {
 }
 
 client.login(process.env.CLIENT_TOKEN);
-
-// Connect to MongoDB before starting the bot
-connectDB()
-  .then(() => {
-    client.login(process.env.CLIENT_TOKEN);
-  })
-  .catch(console.error);
